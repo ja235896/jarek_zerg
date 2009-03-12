@@ -16,11 +16,15 @@ import battlecode.common.Team;
  */
 
 public class Comms {
+	private static final Integer MAGIC_NUMBER = 3503;
+
 	/** If true then print debug strings */
 	private final boolean DEBUG = false;
 
 	private final RobotController myRC;
 	public final int signature;
+	
+	private Integer myPrivateKey;
 	
 	public enum MessageType {
 		/**
@@ -102,14 +106,21 @@ public class Comms {
 		public CompoundMessage(){}
 	}
 	
-	private ArrayList<CompoundMessage> queued = new ArrayList<CompoundMessage>();
+	public List<CompoundMessage> queued = new ArrayList<CompoundMessage>();
+
+	private Map<Integer, Integer> uniqKeyMap;
+
+	private int myRobotId;
 
 	public Comms(RobotController rc) {
 		myRC = rc;
 		if (myRC.getTeam() == Team.A)
-			signature = 154;
+			signature = 1154;
 		else
-			signature = 210;
+			signature = 1210;
+		uniqKeyMap = new HashMap<Integer, Integer>();
+		myRobotId = myRC.getRobot().getID();
+		myPrivateKey = smallestUniqKey(myRobotId);
 	}
 	
 	public int dirToInt(Direction dir){
@@ -145,11 +156,12 @@ public class Comms {
 	}
 	
 	// convert message to a list of easy-to-read classes, ignoring messages not addressed to me
-	public ArrayList<CompoundMessage> translateMessage(Message msg){
-		ArrayList<CompoundMessage> result = new ArrayList<CompoundMessage>();
-		int i = 1, j = 0;
-		if ((msg != null) && (msg.ints != null)) {
-			if (msg.ints[0] != signature) return result;
+	public List<CompoundMessage> translateMessage(Message msg){
+		List<CompoundMessage> result = new ArrayList<CompoundMessage>();
+		int i = 3, j = 0;
+		if ((msg != null) && (msg.ints != null) && (msg.ints.length >= 3)) {
+			if (msg.ints[0] != signature) return null;
+			if (!checkSenderSignature(msg.ints[1], msg.ints[2])) return result;
 			while (i < msg.ints.length) {
 				CompoundMessage cmsg = new CompoundMessage();
 				cmsg.type = MessageType.fromInt(msg.ints[i]);
@@ -173,13 +185,31 @@ public class Comms {
 				}
 				result.add(cmsg);
 			}
+			return result;
 		}
-		return result;
+		return null;
 	}
 	
+	private boolean checkSenderSignature(Integer robotId, Integer uniqKey) {
+		robotId = robotId - MAGIC_NUMBER;
+		Integer oldUniqKey = uniqKeyMap.get(robotId);
+		if (oldUniqKey == null)
+			oldUniqKey = smallestUniqKey(robotId) - 1; /* smallest acceptable key */
+
+		if (oldUniqKey >= uniqKey)
+			return false; /* probably same message resent - fail */
+		
+		uniqKeyMap.put(robotId, uniqKey); /* good key - record so no duplicates will occur */
+		return true;
+	}
+	
+	private Integer smallestUniqKey(Integer robotId){
+		return MAGIC_NUMBER + robotId;
+	}
+
 	public Message buildMessage(List<CompoundMessage> cmsgs){
 		Message result = new Message();
-		int intsSize = 1, locsSize = 0;
+		int intsSize = 3, locsSize = 0;
 		for (CompoundMessage cmsg : cmsgs) {
 			if (cmsg.type.hasParam)
 				intsSize += 2;
@@ -191,9 +221,11 @@ public class Comms {
 		if (intsSize!=0)
 			result.ints = new int[intsSize];
 		result.ints[0] = signature;
+		result.ints[1] = myRobotId;
+		result.ints[2] = myPrivateKey++;
 		if (locsSize!=0)
 			result.locations = new MapLocation[locsSize];
-		int i = 1, j = 0;
+		int i = 3, j = 0;
 		for (CompoundMessage cmsg : cmsgs) {
 			String s = "Sending message " + cmsg.type;
 			result.ints[i] = cmsg.type.code;
@@ -228,11 +260,35 @@ public class Comms {
 		}
 	}
 	
-	public void transmitMessages() throws GameActionException{
+	public boolean transmitMessages() throws GameActionException{
 		if (queued.size() > 0) {
 			Message msg = buildMessage(queued);
 			myRC.broadcast(msg);
 			queued.clear();
+			return true;
 		}
+		return false;
+	}
+
+	public void printMessage(Message msg) {
+		System.out.println("Message");
+		if (msg.ints == null)
+			System.out.println("int []");
+		else {
+			System.out.print("int [");
+			for (int i : msg.ints) {
+				System.out.print(i+", ");
+			}
+			System.out.println("]");
+		}
+		if (msg.locations == null)
+			System.out.println("loc []");
+		else
+			System.out.println("loc "+Arrays.asList(msg.locations));
+		if (msg.strings == null)
+			System.out.println("str []");
+		else
+			System.out.println("str "+Arrays.asList(msg.strings));
+		System.out.println();
 	}
 }

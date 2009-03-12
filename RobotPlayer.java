@@ -1,6 +1,6 @@
 package Jarek_zerg;
 
-import java.util.ArrayList;
+import java.util.*;
 
 import Jarek_zerg.Comms;
 import Jarek_zerg.GeneralRobot;
@@ -53,16 +53,24 @@ public class RobotPlayer implements Runnable {
 
 				Message[] allMessages = myRC.getAllMessages();
 				for (Message msg : allMessages) {
-					ArrayList<Comms.CompoundMessage> cmsgs = myRobot.comms.translateMessage(msg);
+					List<Comms.CompoundMessage> cmsgs = myRobot.comms.translateMessage(msg);
 					if (cmsgs!=null)
 						myRobot.processMessage(cmsgs);
+					else {
+						//myRobot.comms.printMessage(msg);
+						myRobot.spam.add(msg);
+					}
 				}
 				if (myRC.isMovementActive()) {
 					myRobot.idling();
 				} else {
 					myRobot.action();
 				}
-				myRobot.comms.transmitMessages();
+				if (!myRobot.comms.transmitMessages()){
+					/* nothing was sent, so we can send spam */
+					if (Clock.getBytecodeNum() < 5000) /* don't run into next round while sending spam */
+						myRobot.spam.sendSpam();
+				}
 				myRC.yield();
 
 				/** * end of main loop ** */ // yes, I noticed...

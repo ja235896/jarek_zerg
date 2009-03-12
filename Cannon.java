@@ -42,7 +42,7 @@ public class Cannon extends GeneralRobot {
 	}
 
 	@Override
-	public void processMessage(ArrayList<Comms.CompoundMessage> cmsgs){
+	public void processMessage(List<Comms.CompoundMessage> cmsgs){
 		for (CompoundMessage cmsg : cmsgs) {
 			switch(cmsg.type){
 			case ARTY:
@@ -88,6 +88,7 @@ public class Cannon extends GeneralRobot {
 	@Override
 	public void idling() throws GameActionException {
 		myRC.setIndicatorString(2, mission.toString());
+		feedBrethren();
 	}
 	
 	@Override
@@ -163,6 +164,38 @@ public class Cannon extends GeneralRobot {
 			nextTarget = null;
 			break;
 		default:
+		}
+		tryToGetNearEnemy();
+	}
+
+	/**
+	 * Moves robot closer to enemy, but not further than Archon range
+	 * @throws GameActionException
+	 */
+	private void tryToGetNearEnemy() throws GameActionException {
+		if (nextTarget == null)
+			return; /* no target locked */
+		if (myRC.hasActionSet())
+			return; /* we are doing something during this round */
+		if (myRC.getRoundsUntilMovementIdle() > 0)
+			return; /* we cannot move */
+		
+		Direction dir = myRC.getLocation().directionTo(nextTarget);
+		if (myRC.getDirection() != dir) {
+			myRC.setDirection(dir);
+			return; /* rotated */
+		}
+		
+		if (!myRC.canMove(dir))
+			return; /* cannot move there */
+
+		MapLocation destination = myRC.getLocation().add(dir);
+		for (MapLocation archonLoc : myRC.senseAlliedArchons()) {
+			if (destination.equals(archonLoc) || destination.isAdjacentTo(archonLoc)){
+				/* great. we'll be in archon's range - move now */
+				myRC.moveForward();
+				return;
+			}
 		}
 	}
 }

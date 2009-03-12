@@ -77,6 +77,7 @@ public class Worker extends GeneralRobot {
 		
 		if (mission != Mission.NONE)
 			checkIfHungry();
+		feedBrethren();
 		
 		switch (mission) {
 
@@ -499,7 +500,7 @@ public class Worker extends GeneralRobot {
 	}
 	
 	@Override
-	public void processMessage(ArrayList<Comms.CompoundMessage> cmsgs){
+	public void processMessage(List<Comms.CompoundMessage> cmsgs){
 		for (CompoundMessage cmsg : cmsgs) {
 			switch(cmsg.type){
 			case GOTO:

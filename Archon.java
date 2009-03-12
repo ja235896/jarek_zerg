@@ -7,17 +7,7 @@ import java.util.List;
 import Jarek_zerg.Comms;
 import Jarek_zerg.Comms.CompoundMessage;
 
-import battlecode.common.Clock;
-import battlecode.common.Direction;
-import battlecode.common.FluxDeposit;
-import battlecode.common.FluxDepositInfo;
-import battlecode.common.GameActionException;
-import battlecode.common.MapLocation;
-import battlecode.common.Robot;
-import battlecode.common.RobotController;
-import battlecode.common.RobotInfo;
-import battlecode.common.RobotLevel;
-import battlecode.common.RobotType;
+import battlecode.common.*;
 import static battlecode.common.GameConstants.*;
 
 /**
@@ -27,6 +17,8 @@ import static battlecode.common.GameConstants.*;
  */
 
 public class Archon extends GeneralRobot {
+	/** If true then print debug strings */
+	private final boolean DEBUG = false;
 
 	/**
 	 * Actual task of Archon. Can be viewed as state of robot.
@@ -116,7 +108,7 @@ public class Archon extends GeneralRobot {
 			}
 		}
 	}
-	
+
 	private FluxDepositInfo fluxInfo;
 	private ArrayList<MapLocation> avoidedFlux = new ArrayList<MapLocation>();
 	private int boastCounter = 0;
@@ -137,20 +129,29 @@ public class Archon extends GeneralRobot {
 	private MapLocation siegeLoc;
 	private CombatMode combatMode = CombatMode.NONE;
 	
-	private int maxSpawnSeries = 4;
+	private int maxSpawnSeries = 2;
 	private int scoutCount = 2;
 	private boolean initialScouts = false;
 	private int workerCount = 2;
 	
+	private int oppScore = 0;
+	
 	private RobotType nextRobotType(int sequence){
-		if (sequence == 0) return RobotType.CHANNELER;
-		if (sequence == 2) return RobotType.WORKER;
+		//if (sequence == 0) return RobotType.CHANNELER;
+		//if (sequence == 2) return RobotType.WORKER;
 		return RobotType.CANNON;
 	}
 	
 	private boolean useFluxBurn = true;
 	private double fluxBurnThreshold = 0.2;
+	private MapLocation[] oldAlliedArchons = new MapLocation[6];
 	
+	/** Energon treshold. Won't spawn when less than this will remain */
+	private final double minimalEnergonLevel = 20.0;
+
+	/** Panic level. If energon is that low, then we panic */
+	private final double panicEnergonLevel = 24.0;
+
 	public Archon(RobotController rc) {
 		super(rc);
 		fluxInfo = null;
@@ -158,7 +159,7 @@ public class Archon extends GeneralRobot {
 	}
 	
 	@Override
-	public void processMessage(ArrayList<Comms.CompoundMessage> cmsgs){
+	public void processMessage(List<Comms.CompoundMessage> cmsgs){
 		for (CompoundMessage cmsg : cmsgs) {
 			switch(cmsg.type){
 			case GOING_TO_LOC:
@@ -197,6 +198,106 @@ public class Archon extends GeneralRobot {
 			myRC.setIndicatorString(2, Integer.toString(myNumber) + " " + mission.toString() + " " + combatMode);
 		else
 			myRC.setIndicatorString(2, Integer.toString(myNumber) + " " + mission.toString());
+		//checkIfArchonDied(); /* it seems not to be the best solution */
+	}
+	
+	/**
+	 * Checks if any archon died, and if so then it goes there.
+	 */
+	@SuppressWarnings("unused")
+	private void checkIfArchonDied() {
+		MapLocation[] alliedArchons = myRC.senseAlliedArchons();
+		if (oldAlliedArchons.length != alliedArchons.length){
+			/* oh noes! someone died */
+
+			if (DEBUG) System.out.println("oh noes! someone died");
+			MapLocation archonDiedLoc = whereArchonDied(alliedArchons);
+			if (DEBUG) System.out.println(archonDiedLoc);
+			
+			/* revenge! let's go there and deal with enemy */
+			myRC.setIndicatorString(1, "Going to a fight");
+			mission = Mission.GO_TO_COMBAT;
+			siegeLoc = archonDiedLoc;
+			if (combatMode == CombatMode.NONE)
+				combatMode =  CombatMode.STD;
+			
+			//myRC.breakpoint();
+		}
+		this.oldAlliedArchons = alliedArchons;
+	}
+
+	/**
+	 * Guesses where archon died.
+	 */
+	private MapLocation whereArchonDied(MapLocation[] alliedArchons){
+		int j;
+		for (int died=0; died<oldAlliedArchons.length; died++){
+			boolean fail = false;
+			for (int i=0; i<oldAlliedArchons.length; i++){
+				if (i == died) continue;
+				if (i > died)
+					j = i - 1;
+				else
+					j = i;
+				if (alliedArchons[j].distanceSquaredTo(oldAlliedArchons[i]) >= 3.0)
+					fail = true;
+			}
+			if (!fail)
+				return oldAlliedArchons[died];
+		}
+		
+		if (DEBUG) System.out.println("Error: Have no idea where archon died");
+		return oldAlliedArchons[0]; // search failed
+	}
+	
+	/**
+	 * Is this situation dangerous?
+	 * @throws GameActionException 
+	 */
+	private void shouldIPanic() throws GameActionException{
+		if (Clock.getRoundNum() <= 20) return; /* why panic so early? */
+		
+		if (myRC.hasActionSet() || (myRC.getRoundsUntilMovementIdle() > 0)){
+			/* cannot move. panic won't be useful */
+			return;
+		}
+			
+		if (myRC.getEnergonLevel() > panicEnergonLevel){
+			/* not hungry. no need to panic. */
+			return;
+		}
+
+		Team myTeam = myRC.getTeam();
+
+		int enemyCount = 0;
+		int enemyCenterX = 0;
+		int enemyCenterY = 0;
+
+		/* where's the center of enemies */
+		List<RobotInfo> nearbyRobots = navigation.robotsToRobotsInfo(navigation.senseNearbyRobots(true, true));
+		for (RobotInfo info : nearbyRobots) {
+			if (info.team != myTeam) {
+				enemyCount++;
+				enemyCenterX += info.location.getX();
+				enemyCenterY += info.location.getY();
+			}
+		}
+		
+		if (enemyCount == 0) {
+			/* we're hungry, but no need to panic. no enemies nearby */
+			return;
+		}
+		enemyCenterX /= enemyCount;
+		enemyCenterY /= enemyCount;
+		MapLocation enemyCenter = new MapLocation(enemyCenterX, enemyCenterY);
+		
+		/* ok. now i'm going to panic */
+		Direction directionToRunAway = myRC.getLocation().directionTo(enemyCenter).opposite();
+		if (!myRC.canMove(directionToRunAway)){
+			directionToRunAway = navigation.findNearestFreeDirection(directionToRunAway);
+		}
+		if (DEBUG) System.out.println("Panic! Run away "+directionToRunAway);
+		navigation.forcedGoOneStep(myRC.getLocation().add(directionToRunAway));
 	}
 	
 	public void commonPostMission() throws GameActionException{
@@ -204,14 +305,16 @@ public class Archon extends GeneralRobot {
 			feedMinions();
 		if ((mission.isCombat()) && (useFluxBurn)){
 			if (myRC.getEnergonLevel() < fluxBurnThreshold * RobotType.ARCHON.maxEnergon()){
-				try{
-					myRC.burnFlux();
-				}
-				catch (Exception e){
-					
+				int myScore = myRC.senseTeamPoints(myRC.getRobot());
+				if (Math.abs(oppScore - myScore) > 1000){ /* if score is close then don't risk losing */
+					try{
+						myRC.burnFlux();
+					}
+					catch (Exception e){}
 				}
 			}
 		}
+		shouldIPanic();
 	}
 
 	@Override
@@ -259,7 +362,7 @@ public class Archon extends GeneralRobot {
 		case SPAWN_SCOUT:
 			if (performAttackCheck()) break;
 			if (myRC.canMove(myRC.getDirection())){
-				if (myRC.getEnergonLevel() - 1.0 > RobotType.SCOUT.spawnCost()){
+				if (myRC.getEnergonLevel() - minimalEnergonLevel > RobotType.SCOUT.spawnCost()){
 					myRC.spawn(RobotType.SCOUT);
 					mission = Mission.FEED_SCOUT;
 					spawned++;
@@ -381,7 +484,7 @@ public class Archon extends GeneralRobot {
 				myRC.setDirection(nextDirection);
 			} else {
 				RobotType rt = nextRobotType(spawned);
-				if (myRC.getEnergonLevel() - 1.0 >= rt.spawnCost()) {
+				if (myRC.getEnergonLevel() - minimalEnergonLevel >= rt.spawnCost()) {
 					myRC.spawn(rt);
 					++spawned;
 					mission = Mission.FEED_ARMED_FORCES;
@@ -403,9 +506,11 @@ public class Archon extends GeneralRobot {
 		case DRAIN_DEPOSIT:
 			if (performDefendCheck()) break;
 			/* Draining flux */
-			fluxInfo = myRC.senseFluxDepositInfo(myRC.senseFluxDepositAtLocation(myRC.getLocation()));
+			FluxDeposit fluxDeposit = myRC.senseFluxDepositAtLocation(myRC.getLocation());
+			if (fluxDeposit != null)
+				fluxInfo = myRC.senseFluxDepositInfo(fluxDeposit);
 			/* Leave if drained */
-			if (fluxInfo.roundsAvailableAtCurrentHeight == 0) {
+			if ((fluxDeposit == null) || (fluxInfo.roundsAvailableAtCurrentHeight == 0)) {
 				mission = Mission.FIND_FLUX_DEPOSIT;
 				locateNearestFlux();
 				break;
@@ -447,8 +552,13 @@ public class Archon extends GeneralRobot {
 
 	private void performArmySpawn() throws GameActionException {
 		Direction dir = findSpawnLocation(myRC.getDirection());
-		if (dir != myRC.getDirection())
+		if (dir != myRC.getDirection()){
+			if (myRC.getRoundsUntilMovementIdle() > 0)
+				return; /* sorry, no movement - no spawning */
+			if (dir.equals(Direction.NONE))
+				return; /* sorry, no place to spawn */
 			myRC.setDirection(dir);
+		}
 		RobotType rt = null;
 		//switch(combatMode){
 		//case SEC:
@@ -461,7 +571,7 @@ public class Archon extends GeneralRobot {
 		//	rt = RobotType.SOLDIER;
 		//	break;
 		//}
-		if (myRC.getEnergonLevel() - 10.0 > rt.spawnCost()) {
+		if (myRC.getEnergonLevel() - minimalEnergonLevel > rt.spawnCost()) {
 			myRC.spawn(rt);
 			spawned++;
 		}
@@ -519,6 +629,8 @@ public class Archon extends GeneralRobot {
 		for (Robot robot : robots) {
 			RobotInfo info = myRC.senseRobotInfo(robot);			
 			if ((info.team != myRC.getTeam())) {
+				if (info.type == RobotType.ARCHON)
+					oppScore = myRC.senseTeamPoints(robot); /* update opp score */
 				if ((info.type == RobotType.ARCHON) && // hard-coded, so what
 						(info.location.distanceSquaredTo(myRC.getLocation()) < 40)) {
 					siegeLoc = info.location;
@@ -548,7 +660,7 @@ public class Archon extends GeneralRobot {
 		armySize = 0;
 		double threshold;
 
-		double myEnergonLevel = myRC.getEnergonLevel() - 1.0;
+		double myEnergonLevel = myRC.getEnergonLevel() - minimalEnergonLevel;
 		for (Robot robot : robots) {
 			RobotInfo info = myRC.senseRobotInfo(robot);
 			if (info.team == myRC.getTeam()) {
@@ -656,13 +768,20 @@ public class Archon extends GeneralRobot {
 				return;
 			}
 			RobotType rt = RobotType.WORKER;
-			if (myRC.getEnergonLevel() - 1.0 >= rt.spawnCost()) {
+			if (myRC.getEnergonLevel() - minimalEnergonLevel >= rt.spawnCost()) {
 				myRC.spawn(rt);
 			}
 		}
 	}
 	
 	private void defendFlux() throws GameActionException{
+		FluxDeposit fluxDeposit = myRC.senseFluxDepositAtLocation(myRC.getLocation());
+		if (fluxDeposit == null) {
+			mission = Mission.FIND_FLUX_DEPOSIT;
+			locateNearestFlux();
+			return;
+		}
+
 		if (!checkEnemiesToAttack()) {
 			mission = Mission.FEED_ARMED_FORCES;
 			myRC.setIndicatorString(1, "");

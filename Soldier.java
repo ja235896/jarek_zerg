@@ -44,7 +44,7 @@ public class Soldier extends GeneralRobot {
 	}
 	
 	@Override
-	public void processMessage(ArrayList<Comms.CompoundMessage> cmsgs){
+	public void processMessage(List<Comms.CompoundMessage> cmsgs){
 		for (CompoundMessage cmsg : cmsgs) {
 			switch(cmsg.type){
 			case ATTACK:

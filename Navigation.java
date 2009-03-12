@@ -5,10 +5,7 @@ import java.util.*;
 import Jarek_zerg.astar.*;
 import Jarek_zerg.exceptions.HungryException;
 import Jarek_zerg.map.*;
-import battlecode.common.Direction;
-import battlecode.common.GameActionException;
-import battlecode.common.MapLocation;
-import battlecode.common.RobotController;
+import battlecode.common.*;
 import battlecode.common.TerrainTile.TerrainType;
 
 /**
@@ -139,6 +136,26 @@ public class Navigation {
 		return NaviResult.UNKNOWN_ERROR;
 	}
 	
+	/**
+	 * Go one step to specified destination. Breaks only on error or when moved.
+	 * @param destination
+	 */
+	public void forcedGoOneStep(MapLocation destination){
+		List<MapLocation> tempPath = Collections.singletonList(destination);
+		
+		while (true){
+			NaviResult naviResult = goUsingPath(tempPath);
+			if (naviResult == NaviResult.MOVED){
+				myRC.yield();
+				return; /* Moved. Back to other tasks. */
+			}else if (naviResult == NaviResult.CHANGED_DIRECTION){
+				myRC.yield();
+			}else{
+				return; /* Some error occured. Move not possible. Ignore command. */
+			}
+		}	
+	}
+	
 	public List<MapLocation> createSimplePath(MapLocation fromLoc, MapLocation toLoc){
 		MapLocation actual = fromLoc;
 		List<MapLocation> result = new ArrayList<MapLocation>();
@@ -206,6 +223,32 @@ public class Navigation {
 		}
 		return result;
 	}
+
+	public List<Robot> senseNearbyRobots(boolean ground, boolean airborne){
+		List<Robot> robots = new ArrayList<Robot>();
+		if (ground)
+			Collections.addAll(robots, myRC.senseNearbyGroundRobots());
+		if (airborne)
+			Collections.addAll(robots, myRC.senseNearbyAirRobots());
+		return robots;
+	}
+
+	public List<RobotInfo> robotsToRobotsInfo(List<Robot> robots) throws GameActionException{
+		List<RobotInfo> result = new ArrayList<RobotInfo>();
+		for (Robot robot : robots) {
+			result.add(myRC.senseRobotInfo(robot));
+		}
+		return result;
+	}
+	
+	public List<MapLocation> robotsInfoToLocations(List<RobotInfo> robotsInfo) throws GameActionException{
+		List<MapLocation> result = new ArrayList<MapLocation>();
+		for (RobotInfo robotInfo : robotsInfo) {
+			result.add(robotInfo.location);
+		}
+		return result;
+	}
+
 }
 
 
